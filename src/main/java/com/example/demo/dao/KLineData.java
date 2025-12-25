@@ -50,10 +50,17 @@ public class KLineData {
     @JSONField(name = "f61")
     private Double turnoverRate;// 换手率
 
+    // 新增：K线周期
+    private Integer klt = 101;  // 默认日K线
+
     // 构造方法
     public KLineData() {}
 
     public KLineData(String klineStr) {
+        this(klineStr, 101); // 默认日K
+    }
+
+    public KLineData(String klineStr, int klt) {
         String[] parts = klineStr.split(",");
         if (parts.length >= 11) {
             this.date = java.sql.Date.valueOf(parts[0]);
@@ -67,7 +74,20 @@ public class KLineData {
             this.changeRate = Double.parseDouble(parts[8]);
             this.changeAmount = Double.parseDouble(parts[9]);
             this.turnoverRate = Double.parseDouble(parts[10]);
-            this.lastClose =  close - changeAmount;
+            this.lastClose = close - changeAmount;
+            this.klt = klt;
+        }
+    }
+
+    public String getPeriodName() {
+        switch (klt) {
+            case 101: return "日K";
+            case 102: return "周K";
+            case 103: return "月K";
+            case 104: return "季K";
+            case 105: return "半年K";
+            case 106: return "年K";
+            default: return "未知";
         }
     }
 

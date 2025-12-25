@@ -42,8 +42,8 @@ public class PromptGenerationServiceTest {
             System.out.println("历史数据天数: " +
                     (prompt.getHistoricalData() != null ? prompt.getHistoricalData().size() : 0));
             System.out.println("实际次日涨跌: " +
-                    (prompt.getActualNextDayRise() != null ?
-                            (prompt.getActualNextDayRise() ? "上涨" : "下跌") : "未知"));
+                    (prompt.getActualNextPeriodRise() != null ?
+                            (prompt.getActualNextPeriodRise() ? "上涨" : "下跌") : "未知"));
             System.out.println("提示词预览:");
             System.out.println(prompt.getPrompt().substring(0,
                     Math.min(300, prompt.getPrompt().length())) + "...");
@@ -58,14 +58,14 @@ public class PromptGenerationServiceTest {
         Date targetDate = sdf.parse("2025-10-19");
 
         StockAnalysisPrompt prompt =
-                promptGenerationService.generateSinglePrompt(stockCode, targetDate);
+                promptGenerationService.generateSinglePrompt(stockCode, targetDate,101);
 
         if (prompt != null) {
             System.out.println("单日提示词生成结果:");
             System.out.println("分析日期: " + sdf.format(prompt.getAnalysisDate()));
             System.out.println("历史数据条数: " + prompt.getHistoricalData().size());
-            System.out.println("实际次日涨跌: " +
-                    (prompt.getActualNextDayRise() ? "上涨" : "下跌"));
+            System.out.println("实际下期涨跌: " +
+                    (prompt.getActualNextPeriodRise() ? "上涨" : "下跌"));
             System.out.println("\n完整提示词:");
             System.out.println(prompt.getPrompt());
         } else {

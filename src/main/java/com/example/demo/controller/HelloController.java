@@ -12,7 +12,7 @@ import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 
-@RestController // 或 @Controller
+@RestController
 public class HelloController {
 
     @Resource
@@ -20,13 +20,16 @@ public class HelloController {
 
     // 根据日期，生成prompt
     @GetMapping(value = "/", produces = MediaType.APPLICATION_JSON_VALUE) // 映射根路径
-    public String home(@RequestParam(required = false) String date, @RequestParam(required = false) String code) throws ParseException {
+    public String home(
+            @RequestParam(required = false) String date,
+            @RequestParam(required = false, defaultValue = "510500") String code,
+            @RequestParam(required = false, defaultValue = "101") Integer kt) throws ParseException {
         String stockCode = code == null ? "510500" : code;
         SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
         Date targetDate = date == null ? new Date() : sdf.parse(date);
 
         StockAnalysisPrompt prompt =
-                promptGenerationService.generateSinglePrompt(stockCode, targetDate);
+                promptGenerationService.generateSinglePrompt(stockCode, targetDate, kt);
 
         return prompt.getPrompt();
     }

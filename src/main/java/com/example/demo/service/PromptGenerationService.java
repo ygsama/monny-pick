@@ -9,7 +9,7 @@ import java.text.SimpleDateFormat;
 import java.util.*;
 
 /**
- * 提示词生成服务
+ * 多周期提示词生成服务
  */
 @Service
 public class PromptGenerationService {
@@ -18,17 +18,36 @@ public class PromptGenerationService {
     private KLineDao kLineDao;
 
     private static final int RANDOM_DAYS_COUNT = 10;
-    private static final int HISTORICAL_DAYS = 30;
+    private static final Map<Integer, Integer> HISTORICAL_COUNT_MAP = new HashMap<>();
+
+    static {
+        HISTORICAL_COUNT_MAP.put(101, 30);  // 日K: 30个交易日
+        HISTORICAL_COUNT_MAP.put(102, 30);  // 周K: 12周（约3个月）
+        HISTORICAL_COUNT_MAP.put(103, 30);   // 月K: 6个月
+        HISTORICAL_COUNT_MAP.put(104, 30);   // 季K: 4个季度
+        HISTORICAL_COUNT_MAP.put(105, 30);   // 半年K: 3个
+        HISTORICAL_COUNT_MAP.put(106, 30);   // 年K: 3年
+    }
+
     private final Random random = new Random();
 
+    // 原有的日K方法保持不变
+    public List<StockAnalysisPrompt> generateDefaultPrompts(String stockCode) {
+        return generateMultiplePrompts(stockCode, 101, RANDOM_DAYS_COUNT);
+    }
+
+    public List<StockAnalysisPrompt> generateMultiplePrompts(String stockCode, Date targetDate, int count) {
+        return generateMultiplePrompts(stockCode, 101, targetDate, count);
+    }
+
     /**
-     * 生成多个随机日期的分析提示词
+     * 生成多周期的分析提示词
      */
-    public List<StockAnalysisPrompt> generateMultiplePrompts(String stockCode, int count) {
+    public List<StockAnalysisPrompt> generateMultiplePrompts(String stockCode, int klt, int count) {
         List<StockAnalysisPrompt> prompts = new ArrayList<>();
 
         // 获取所有可用的日期
-        List<Date> availableDates = getAvailableDatesWithSufficientHistory(stockCode);
+        List<Date> availableDates = getAvailableDatesWithSufficientHistory(stockCode, klt);
         if (availableDates.size() < count) {
             count = availableDates.size();
         }
@@ -38,7 +57,7 @@ public class PromptGenerationService {
         List<Date> selectedDates = availableDates.subList(0, Math.min(count, availableDates.size()));
 
         for (Date targetDate : selectedDates) {
-            StockAnalysisPrompt prompt = generateSinglePrompt(stockCode, targetDate);
+            StockAnalysisPrompt prompt = generateSinglePrompt(stockCode, targetDate, klt);
             if (prompt != null) {
                 prompts.add(prompt);
             }
@@ -48,26 +67,44 @@ public class PromptGenerationService {
     }
 
     /**
-     * 生成单个日期的分析提示词
+     * 生成多周期的分析提示词（指定目标日期）
      */
-    public StockAnalysisPrompt generateSinglePrompt(String stockCode, Date targetDate) {
+    public List<StockAnalysisPrompt> generateMultiplePrompts(String stockCode, int klt, Date targetDate, int count) {
+        List<StockAnalysisPrompt> prompts = new ArrayList<>();
+
+        for (int i = 0; i < count; i++) {
+            StockAnalysisPrompt prompt = generateSinglePrompt(stockCode, targetDate, klt);
+            if (prompt != null) {
+                prompts.add(prompt);
+            }
+        }
+
+        return prompts;
+    }
+
+    /**
+     * 生成单个日期的多周期分析提示词
+     */
+    public StockAnalysisPrompt generateSinglePrompt(String stockCode, Date targetDate, int klt) {
         try {
-            // 获取目标日期前30天的历史数据
-            List<KLineData> historicalData = getHistoricalData(stockCode, targetDate, 90);
-            if (historicalData == null || historicalData.size() < HISTORICAL_DAYS) {
+            int historicalCount = HISTORICAL_COUNT_MAP.getOrDefault(klt, 35);
+
+            // 获取目标日期前N个周期的历史数据
+            List<KLineData> historicalData = getHistoricalData(stockCode, targetDate, klt, historicalCount);
+            if (historicalData == null || historicalData.size() < historicalCount) {
                 return null;
             }
 
-            // 获取目标日期后一天的实际数据（用于验证）
-            KLineData nextDayData = getNextDayData(stockCode, targetDate);
-            boolean actualRise = nextDayData != null &&
-                    nextDayData.getClose() > nextDayData.getLastClose();
+            // 获取下一个周期的实际数据（用于验证）
+            KLineData nextPeriodData = getNextPeriodData(stockCode, targetDate, klt);
+            boolean actualRise = nextPeriodData != null &&
+                    nextPeriodData.getClose() > nextPeriodData.getLastClose();
 
             // 构建提示词
-            String prompt = buildAnalysisPrompt(stockCode, targetDate, historicalData);
+            String prompt = buildAnalysisPrompt(stockCode, targetDate, historicalData, klt);
 
             return new StockAnalysisPrompt(
-                    stockCode, targetDate, historicalData, prompt, actualRise
+                    stockCode, targetDate, historicalData, prompt, actualRise, klt
             );
 
         } catch (Exception e) {
@@ -77,52 +114,56 @@ public class PromptGenerationService {
     }
 
     /**
-     * 获取目标日期前N天的历史数据
+     * 获取目标日期前N个周期的历史数据
      */
-    private List<KLineData> getHistoricalData(String stockCode, Date targetDate, int days) {
-        Calendar calendar = Calendar.getInstance();
-        calendar.setTime(targetDate);
-        calendar.add(Calendar.DAY_OF_MONTH, -days);
-        Date startDate = calendar.getTime();
-
-        return kLineDao.getKLineData(stockCode, startDate, targetDate);
+    private List<KLineData> getHistoricalData(String stockCode, Date targetDate, int klt, int periods) {
+        return kLineDao.getRecentKLineData(stockCode, klt, periods * 2).stream()
+                .filter(data -> !data.getDate().after(targetDate))
+                .sorted((a, b) -> b.getDate().compareTo(a.getDate()))
+                .limit(periods)
+                .collect(java.util.stream.Collectors.toList());
     }
 
     /**
-     * 获取目标日期后一天的数据
+     * 获取下一个周期的数据
      */
-    private KLineData getNextDayData(String stockCode, Date targetDate) {
-        Calendar calendar = Calendar.getInstance();
-        calendar.setTime(targetDate);
-        calendar.add(Calendar.DAY_OF_MONTH, 1);
-        Date nextDay = calendar.getTime();
-        KLineData byDate = kLineDao.getKLineDataByDate(stockCode, nextDay);
-        for (int i = 0; i < 5; i++) {
-            if (byDate == null){
-                calendar.add(Calendar.DAY_OF_MONTH, 1);
-                byDate = kLineDao.getKLineDataByDate(stockCode, calendar.getTime());
+    private KLineData getNextPeriodData(String stockCode, Date targetDate, int klt) {
+        List<KLineData> allData = kLineDao.getAllKLineData(stockCode, klt);
+        if (allData == null || allData.isEmpty()) {
+            return null;
+        }
+
+        // 按日期排序
+        allData.sort((a, b) -> a.getDate().compareTo(b.getDate()));
+
+        for (int i = 0; i < allData.size() - 1; i++) {
+            if (allData.get(i).getDate().equals(targetDate)) {
+                return allData.get(i + 1);
             }
         }
-        return kLineDao.getKLineDataByDate(stockCode, nextDay);
+
+        return null;
     }
 
     /**
      * 获取所有有足够历史数据的可用日期
      */
-    private List<Date> getAvailableDatesWithSufficientHistory(String stockCode) {
+    private List<Date> getAvailableDatesWithSufficientHistory(String stockCode, int klt) {
         List<Date> availableDates = new ArrayList<>();
 
         // 获取所有数据
-        List<KLineData> allData = kLineDao.getAllKLineData(stockCode);
-        if (allData == null || allData.size() <= HISTORICAL_DAYS) {
+        List<KLineData> allData = kLineDao.getAllKLineData(stockCode, klt);
+        int requiredCount = HISTORICAL_COUNT_MAP.getOrDefault(klt, 30);
+
+        if (allData == null || allData.size() <= requiredCount) {
             return availableDates;
         }
 
         // 按日期排序（从早到晚）
         allData.sort((a, b) -> a.getDate().compareTo(b.getDate()));
 
-        // 从第31个数据点开始（确保有前30天数据）
-        for (int i = HISTORICAL_DAYS; i < allData.size() - 1; i++) {
+        // 确保有足够的历史数据和后续验证数据
+        for (int i = requiredCount; i < allData.size() - 1; i++) {
             availableDates.add(allData.get(i).getDate());
         }
 
@@ -130,30 +171,31 @@ public class PromptGenerationService {
     }
 
     /**
-     * 构建分析提示词
+     * 构建多周期分析提示词
      */
     private String buildAnalysisPrompt(String stockCode, Date targetDate,
-                                       List<KLineData> historicalData) {
+                                       List<KLineData> historicalData, int klt) {
         StringBuilder prompt = new StringBuilder();
         SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+        String periodName = getPeriodName(klt);
 
-        prompt.append("你是一个数学专业出身的股票实盘大赛冠军，请分析以下股票历史数据，预测下一个交易日的涨跌情况：\n\n");
+        prompt.append("你是一个数学专业出身的股票实盘大赛冠军，请分析以下股票历史数据，预测下一个").append(periodName).append("周期的涨跌情况：\n\n");
         prompt.append("股票代码：").append(stockCode).append("\n");
         prompt.append("分析日期：").append(sdf.format(targetDate)).append("\n");
-        prompt.append("历史数据（最近几十个交易日）：\n");
+        prompt.append("K线周期：").append(periodName).append("\n");
+        prompt.append("历史数据（最近").append(historicalData.size()).append("个").append(periodName).append("）：\n");
 
         // 添加表头
-        prompt.append(String.format("%-12s %-8s %-8s %-8s %-8s %-8s %-12s %-12s %-6s\n",
-                "日期", "开盘", "收盘", "昨日收盘", "最高", "最低", "成交量", "成交额", "涨跌幅"));
-        prompt.append("------------------------------------------------------------")
-                .append("----------------------------------------------------\n");
+        prompt.append(String.format("%-12s %-8s %-8s %-8s %-8s %-8s %-12s %-12s %-6s %-8s\n",
+                "日期", "开盘", "收盘", "昨收", "最高", "最低", "成交量", "成交额", "涨跌幅", "周期"));
+        prompt.append("-------------------------------------------------------------\n");
 
         // 添加历史数据（按时间倒序，最近的在前）
         List<KLineData> reversedData = new ArrayList<>(historicalData);
         Collections.reverse(reversedData);
 
         for (KLineData data : reversedData) {
-            prompt.append(String.format("%-12s %-8.3f %-8.3f %-8.3f %-8.3f %-8.3f %-12d %-12.0f %-6.2f%%\n",
+            prompt.append(String.format("%-12s %-8.3f %-8.3f %-8.3f %-8.3f %-8.3f %-12d %-12.0f %-6.2f%% %-8s\n",
                     sdf.format(data.getDate()),
                     data.getOpen(),
                     data.getClose(),
@@ -162,7 +204,8 @@ public class PromptGenerationService {
                     data.getLow(),
                     data.getVolume(),
                     data.getAmount(),
-                    data.getChangeRate()));
+                    data.getChangeRate(),
+                    data.getPeriodName()));
         }
 
         prompt.append("\n分析要求：\n");
@@ -180,10 +223,15 @@ public class PromptGenerationService {
         return prompt.toString();
     }
 
-    /**
-     * 批量生成默认数量的提示词
-     */
-    public List<StockAnalysisPrompt> generateDefaultPrompts(String stockCode) {
-        return generateMultiplePrompts(stockCode, RANDOM_DAYS_COUNT);
+    private String getPeriodName(int klt) {
+        switch (klt) {
+            case 101: return "日K线";
+            case 102: return "周K线";
+            case 103: return "月K线";
+            case 104: return "季K线";
+            case 105: return "半年K线";
+            case 106: return "年K线";
+            default: return "未知周期";
+        }
     }
 }

@@ -1,35 +1,32 @@
 package com.example.demo.dao;
+
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
 
 /**
- * K线数据DAO接口[5](@ref)
+ * K线数据DAO接口
  */
 public interface KLineDao {
 
-    /**
-     * 根据股票代码和日期范围获取K线数据
-     */
+    // 原有方法 - 日K线
     List<KLineData> getKLineData(String stockCode, Date startDate, Date endDate);
-
-    /**
-     * 根据股票代码获取所有K线数据
-     */
     List<KLineData> getAllKLineData(String stockCode);
-
-    /**
-     * 根据日期获取特定日期的K线数据
-     */
     KLineData getKLineDataByDate(String stockCode, Date date);
 
-    /**
-     * 清空缓存
-     */
-    void clearCache();
+    // 新增方法 - 支持多周期
+    List<KLineData> getKLineData(String stockCode, Date startDate, Date endDate, int klt);
+    List<KLineData> getAllKLineData(String stockCode, int klt);
+    KLineData getKLineDataByDate(String stockCode, Date date, int klt);
 
-    /**
-     * 获取缓存统计信息
-     */
+    // 获取最近N条K线数据
+    List<KLineData> getRecentKLineData(String stockCode, int klt, int count);
+
+    // 缓存管理
+    void clearCache();
+    void clearCache(String stockCode);
+    void clearCache(String stockCode, int klt);
+
+    // 缓存统计
     Map<String, Object> getCacheStats();
 }
